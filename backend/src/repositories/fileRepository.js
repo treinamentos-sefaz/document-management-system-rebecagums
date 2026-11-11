@@ -10,13 +10,15 @@ function getPath(storageName) {
   return path.join(storageDir, storageName);
 }
 
-async function exists(storageName) {
+async function findExistingPath(storageName) {
+  const filePath = getPath(storageName);
+
   try {
-    await fs.access(getPath(storageName));
-    return true;
+    await fs.access(filePath);
+    return filePath;
   } catch (error) {
     if (error.code === 'ENOENT') {
-      return false;
+      return null;
     }
     throw error;
   }
@@ -34,6 +36,6 @@ async function remove(storageName) {
 
 module.exports = {
   getPath,
-  exists,
+  findExistingPath,
   remove,
 };

@@ -1,31 +1,9 @@
-const path = require('node:path');
-const { randomUUID } = require('node:crypto');
 const documentRepository = require('../repositories/documentRepository');
 const fileRepository = require('../repositories/fileRepository');
-
-function sanitizeOriginalName(originalName) {
-  const normalizedName = path.posix.basename(originalName.replace(/\\/g, '/'));
-  const safeName = normalizedName.replace(/[\u0000-\u001f\u007f]/g, '').trim();
-  return safeName || 'document';
-}
-
-function sanitizeContentType(contentType) {
-  if (/^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/.test(contentType || '')) {
-    return contentType;
-  }
-  return 'application/octet-stream';
-}
+const createDocumentMetadata = require('./documentMetadata');
 
 async function createDocument(file, owner) {
-  const document = {
-    id: randomUUID(),
-    originalName: sanitizeOriginalName(file.originalname),
-    size: file.size,
-    uploadedAt: new Date().toISOString(),
-    owner,
-    contentType: sanitizeContentType(file.mimetype),
-    storageName: file.filename,
-  };
+  const document = createDocumentMetadata(file, owner);
 
   try {
     return documentRepository.save(document);
@@ -46,13 +24,14 @@ async function getDocumentForDownload(id, owner) {
     return null;
   }
 
-  if (!(await fileRepository.exists(document.storageName))) {
+  const filePath = await fileRepository.findExistingPath(document.storageName);
+  if (!filePath) {
     return null;
   }
 
   return {
     document,
-    filePath: fileRepository.getPath(document.storageName),
+    filePath,
   };
 }
 
