@@ -26,52 +26,69 @@ after(async () => {
   fs.rmSync(storageDir, { recursive: true, force: true });
 });
 
-test('o app backend é exportado', () => {
-  assert.ok(app, 'o app deve estar definido');
-  assert.strictEqual(typeof app, 'function', 'o app Express deve ser uma função');
-});
-
-test('upload, listagem e download respeitam o dono do documento', async () => {
-  const owner = 'usuario-teste';
+async function uploadFile(owner, fileName, contents) {
   const form = new FormData();
-  form.append('file', new Blob(['conteudo local'], { type: 'text/plain' }), 'relatorio.txt');
+  form.append('file', new Blob([contents], { type: 'text/plain' }), fileName);
 
-  const uploadResponse = await fetch(`${baseUrl}/upload`, {
+  const response = await fetch(`${baseUrl}/upload`, {
     method: 'POST',
     headers: { 'X-User-Id': owner },
     body: form,
   });
 
-  assert.strictEqual(uploadResponse.status, 201);
-  const { data: document } = await uploadResponse.json();
+  return { response, payload: await response.json() };
+}
+
+test('o app backend é exportado', () => {
+  assert.ok(app, 'o app deve estar definido');
+  assert.strictEqual(typeof app, 'function', 'o app Express deve ser uma função');
+});
+
+test('POST /upload grava o arquivo e retorna metadados públicos', async () => {
+  const { response, payload } = await uploadFile('usuario-upload', 'relatorio.txt', 'conteudo local');
+
+  assert.strictEqual(response.status, 201);
+  const { data: document } = payload;
   assert.strictEqual(document.originalName, 'relatorio.txt');
-  assert.strictEqual(document.owner, owner);
+  assert.strictEqual(document.owner, 'usuario-upload');
   assert.strictEqual(document.size, Buffer.byteLength('conteudo local'));
   assert.ok(document.id);
   assert.ok(document.uploadedAt);
   assert.strictEqual(Object.hasOwn(document, 'storageName'), false);
+});
+
+test('GET /documents lista somente os documentos do usuário', async () => {
+  await uploadFile('usuario-lista', 'proprio.txt', 'arquivo próprio');
+  await uploadFile('outro-usuario', 'privado.txt', 'arquivo alheio');
 
   const ownListResponse = await fetch(`${baseUrl}/documents`, {
-    headers: { 'X-User-Id': owner },
+    headers: { 'X-User-Id': 'usuario-lista' },
   });
-  assert.deepStrictEqual((await ownListResponse.json()).data, [document]);
+  const ownDocuments = (await ownListResponse.json()).data;
+  assert.strictEqual(ownDocuments.length, 1);
+  assert.strictEqual(ownDocuments[0].originalName, 'proprio.txt');
 
   const otherListResponse = await fetch(`${baseUrl}/documents`, {
-    headers: { 'X-User-Id': 'outro-usuario' },
+    headers: { 'X-User-Id': 'usuario-sem-documentos' },
   });
   assert.deepStrictEqual((await otherListResponse.json()).data, []);
+});
+
+test('GET /documents/:id/download retorna o arquivo do dono e oculta arquivos alheios', async () => {
+  const { payload } = await uploadFile('usuario-download', 'relatorio.txt', 'conteudo para download');
+  const document = payload.data;
 
   const deniedDownload = await fetch(`${baseUrl}/documents/${document.id}/download`, {
-    headers: { 'X-User-Id': 'outro-usuario' },
+    headers: { 'X-User-Id': 'outro-usuario-download' },
   });
   assert.strictEqual(deniedDownload.status, 404);
 
   const downloadResponse = await fetch(`${baseUrl}/documents/${document.id}/download`, {
-    headers: { 'X-User-Id': owner },
+    headers: { 'X-User-Id': 'usuario-download' },
   });
   assert.strictEqual(downloadResponse.status, 200);
   assert.match(downloadResponse.headers.get('content-disposition'), /attachment/);
-  assert.strictEqual(await downloadResponse.text(), 'conteudo local');
+  assert.strictEqual(await downloadResponse.text(), 'conteudo para download');
 });
 
 test('requisições sem usuário ou arquivo são rejeitadas', async () => {
